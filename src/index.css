@@ -397,3 +397,6 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 @media print {
   html, body { display: none !important; }
 }
+
+.protect-wall { position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center; padding: 20px; background: var(--bg); text-align: center; }
+.protect-card { padding: 28px 24px; max-width: 420px; display: flex; flex-direction: column; gap: 10px; }

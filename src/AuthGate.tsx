@@ -77,6 +77,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const [isAdmin, setIsAdmin] = useState(false);
     const [tab, setTab] = useState<'login' | 'signup'>('login');
     const [lang, setLang] = useState<LangCode>(initialLang);
+    const [googleOn, setGoogleOn] = useState(false);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState('');
     const [email, setEmail] = useState('');
@@ -179,6 +180,23 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         }
     };
 
+    useEffect(() => {
+        let alive = true;
+        const url = (import.meta.env.VITE_SUPABASE_URL || 'https://nlupwqdvklqwruxabbgx.supabase.co') + '/auth/v1/settings';
+        const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_RcI9TcwbOH5mi2iBZsq8Ow_ki3C7mYn';
+        fetch(url, { headers: { apikey: key } })
+            .then((r) => (r.ok ? r.json() : null))
+            .then((j) => {
+                if (alive) {
+                    setGoogleOn(Boolean(j?.external?.google));
+                }
+            })
+            .catch(() => undefined);
+        return () => {
+            alive = false;
+        };
+    }, []);
+
     const googleSignIn = async () => {
         setErr('');
         setBusy(true);
@@ -264,6 +282,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                             <h2 className="gate-title">{tab === 'login' ? g.title_login : g.title_signup}</h2>
                             <p className="muted">{g.sub}</p>
 
+                            {googleOn && (
+                                <>
                             <button type="button" className="btn ghost gate-cta gate-google" onClick={googleSignIn} disabled={busy}>
                                 <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
                                     <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z" />
@@ -274,6 +294,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                 {GOOGLE_LABEL[lang]}
                             </button>
                             <p className="muted small">{OR_LABEL[lang]}</p>
+                                </>
+                            )}
 
                             <form className="gate-form" onSubmit={sendLink}>
                                 <label className="set-label" htmlFor="gate-email">
