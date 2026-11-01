@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { Lock, Mail } from 'lucide-react';
 import { api, supabase } from './client';
 import { LANGS } from './i18n';
+import { AUTHX } from './auth-i18n';
 import type { LangCode } from './i18n';
 import { GATE } from './gate-i18n';
 
@@ -82,7 +83,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const [err, setErr] = useState('');
     const [email, setEmail] = useState('');
     const [sent, setSent] = useState(false);
+    const [password, setPassword] = useState('');
+    const [password2, setPassword2] = useState('');
+    const [info, setInfo] = useState('');
     const g = GATE[lang];
+    const a = AUTHX[lang];
 
     useEffect(() => {
         const prefs = readPrefs();
@@ -158,25 +163,75 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const sendLink = async (e: FormEvent) => {
         e.preventDefault();
         setErr('');
+        setInfo('');
         const value = email.trim().toLowerCase();
         if (!EMAIL_RE.test(value)) {
             setErr(g.err_email);
             return;
         }
+        if (password.length < 8) {
+            setErr(a.err_pw_short);
+            return;
+        }
+        if (tab === 'signup' && password !== password2) {
+            setErr(a.err_pw_match);
+            return;
+        }
         setBusy(true);
         try {
-            const { error } = await supabase.auth.signInWithOtp({
-                email: value,
-                options: { emailRedirectTo: window.location.origin, shouldCreateUser: true },
+            if (tab === 'signup') {
+                const { data, error } = await supabase.auth.signUp({
+                    email: value,
+                    password,
+                    options: { emailRedirectTo: window.location.origin, data: { app: 'VESTA TEM' } },
+                });
+                if (error) {
+                    throw error;
+                }
+                if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+                    setErr(a.err_exists);
+                    return;
+                }
+                if (!data.session) {
+                    setSent(true);
+                }
+            } else {
+                const { error } = await supabase.auth.signInWithPassword({ email: value, password });
+                if (error) {
+                    throw error;
+                }
+            }
+        } catch (ex) {
+            const msg = String((ex as { message?: string })?.message || '').toLowerCase();
+            if (msg.includes('not confirmed')) {
+                setErr(a.err_unconfirmed);
+            } else if (msg.includes('invalid login')) {
+                setErr(a.err_bad);
+            } else if (msg.includes('already')) {
+                setErr(a.err_exists);
+            } else {
+                setErr(g.err_generic);
+            }
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const resend = async () => {
+        setErr('');
+        setInfo('');
+        try {
+            const { error } = await supabase.auth.resend({
+                type: 'signup',
+                email: email.trim().toLowerCase(),
+                options: { emailRedirectTo: window.location.origin },
             });
             if (error) {
                 throw error;
             }
-            setSent(true);
+            setInfo(a.resent);
         } catch {
             setErr(g.err_generic);
-        } finally {
-            setBusy(false);
         }
     };
 
@@ -251,11 +306,17 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                             <span className="fb-check">
                                 <Mail size={26} />
                             </span>
-                            <h2 className="gate-title">{g.sent_t}</h2>
-                            <p className="muted">{g.sent_d}</p>
+                            <h2 className="gate-title">{a.conf_t}</h2>
+                            <p className="muted">{a.conf_d}</p>
+                            <p className="muted small">{a.conf_hint}</p>
                             <p className="gate-methods">{email.trim()}</p>
-                            <button className="btn ghost" onClick={() => setSent(false)}>
-                                {g.again}
+                            {info && <p className="notice">{info}</p>}
+                            {err && <p className="notice" role="alert">{err}</p>}
+                            <button className="btn" onClick={resend}>
+                                {a.resend}
+                            </button>
+                            <button className="btn ghost" onClick={() => { setSent(false); setTab('login'); setErr(''); setInfo(''); }}>
+                                {a.cta_login}
                             </button>
                         </div>
                     ) : (
@@ -280,7 +341,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                             </div>
 
                             <h2 className="gate-title">{tab === 'login' ? g.title_login : g.title_signup}</h2>
-                            <p className="muted">{g.sub}</p>
+                            <p className="muted">{tab === 'login' ? a.sub_login : a.sub_signup}</p>
 
                             {googleOn && (
                                 <>
@@ -312,8 +373,39 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                     placeholder={g.email_ph}
                                     required
                                 />
+                                <label className="set-label" htmlFor="gate-pw">
+                                    {a.pw}
+                                </label>
+                                <input
+                                    id="gate-pw"
+                                    className="gate-input"
+                                    type="password"
+                                    autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
+                                    value={password}
+                                    onChange={(ev) => setPassword(ev.target.value)}
+                                    placeholder={a.pw_ph}
+                                    minLength={8}
+                                    required
+                                />
+                                {tab === 'signup' && (
+                                    <>
+                                        <label className="set-label" htmlFor="gate-pw2">
+                                            {a.pw2}
+                                        </label>
+                                        <input
+                                            id="gate-pw2"
+                                            className="gate-input"
+                                            type="password"
+                                            autoComplete="new-password"
+                                            value={password2}
+                                            onChange={(ev) => setPassword2(ev.target.value)}
+                                            minLength={8}
+                                            required
+                                        />
+                                    </>
+                                )}
                                 <button className="btn gate-cta" type="submit" disabled={busy}>
-                                    <Mail size={18} /> {g.cta}
+                                    <Mail size={18} /> {tab === 'login' ? a.cta_login : a.cta_signup}
                                 </button>
                             </form>
                             <p className="gate-methods">{g.methods}</p>
@@ -323,7 +415,13 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                     {err}
                                 </p>
                             )}
-                            <p className="muted small">{g.note}</p>
+                            {err === a.err_unconfirmed && (
+                                <button type="button" className="btn ghost btn-sm" onClick={resend}>
+                                    {a.resend}
+                                </button>
+                            )}
+                            {info && <p className="notice">{info}</p>}
+                            <p className="muted small">{tab === 'signup' ? a.note_signup : g.note}</p>
                         </>
                     )}
 
