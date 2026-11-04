@@ -138,7 +138,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         } else if (msg.includes('wrong email')) {
             setErr(a.err_bad);
         } else if (msg.includes('send the email')) {
-            setErr(c.err_mail);
+            const tag = String((ex as { message?: string })?.message || '').match(/\[[^\]]+\]/)?.[0] || '';
+            setErr(`${c.err_mail} ${tag}`.trim());
         } else {
             setErr(g.err_generic);
         }

@@ -41,8 +41,10 @@ export default function ForgotPanel({ lang, initialEmail, onBack }: { lang: Lang
             }
             setStep('code');
         } catch (ex) {
-            const msg = String((ex as { message?: string })?.message || '').toLowerCase();
-            setErr(msg === 'wait' ? f.err_wait : c.err_mail);
+            const raw = String((ex as { message?: string })?.message || '');
+            const msg = raw.toLowerCase();
+            const tag = raw.match(/\[[^\]]+\]/)?.[0] || '';
+            setErr(msg === 'wait' ? f.err_wait : `${c.err_mail} ${tag}`.trim());
         } finally {
             setBusy(false);
         }

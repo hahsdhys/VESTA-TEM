@@ -246,8 +246,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
                 await sendCodeMail(email, code, purpose);
             } catch (e) {
                 await q(`delete from email_codes where id = $1`, [inserted[0].id]);
-                console.error('mail failed', (e as Error).message);
-                return fail(502, 'Could not send the email');
+                const m = e as { code?: string; responseCode?: number; message?: string };
+                console.error('mail failed', m.code, m.responseCode, m.message);
+                const tag = String(m.code || m.message || 'error').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 30);
+                return fail(502, `Could not send the email [${tag}${m.responseCode ? ' ' + m.responseCode : ''}]`);
             }
             return send(200, { ok: true });
         }
