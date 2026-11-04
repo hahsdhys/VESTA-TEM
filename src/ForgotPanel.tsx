@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
 import { KeyRound, Mail } from 'lucide-react';
-import { supabase } from './client';
+import { auth } from './client';
+import { CODEX } from './code-i18n';
 import type { LangCode } from './i18n';
 import { FORGOT } from './forgot-i18n';
 import { GATE } from './gate-i18n';
@@ -14,6 +15,7 @@ export default function ForgotPanel({ lang, initialEmail, onBack }: { lang: Lang
     const f = FORGOT[lang];
     const g = GATE[lang];
     const a = AUTHX[lang];
+    const c = CODEX[lang];
     const [step, setStep] = useState<'email' | 'code'>('email');
     const [email, setEmail] = useState(initialEmail);
     const [code, setCode] = useState('');
@@ -33,17 +35,14 @@ export default function ForgotPanel({ lang, initialEmail, onBack }: { lang: Lang
         }
         setBusy(true);
         try {
-            const { error } = await supabase.auth.resetPasswordForEmail(value);
-            if (error) {
-                throw error;
-            }
+            await auth.sendCode(value, 'reset');
             if (step === 'code') {
                 setInfo(f.code_sent);
             }
             setStep('code');
         } catch (ex) {
             const msg = String((ex as { message?: string })?.message || '').toLowerCase();
-            setErr(msg.includes('rate') || msg.includes('seconds') ? f.err_wait : g.err_generic);
+            setErr(msg === 'wait' ? f.err_wait : c.err_mail);
         } finally {
             setBusy(false);
         }
@@ -63,23 +62,12 @@ export default function ForgotPanel({ lang, initialEmail, onBack }: { lang: Lang
         }
         setBusy(true);
         try {
-            const { error } = await supabase.auth.verifyOtp({
-                email: email.trim().toLowerCase(),
-                token: code.trim(),
-                type: 'recovery',
-            });
-            if (error) {
-                setErr(f.err_code);
-                return;
-            }
-            const { error: upErr } = await supabase.auth.updateUser({ password: pw });
-            if (upErr) {
-                setErr(g.err_generic);
-                return;
-            }
-            // verifyOtp opened a session; AuthGate follows it and enters the store.
-        } catch {
-            setErr(g.err_generic);
+            await auth.reset(email.trim().toLowerCase(), code.trim(), pw);
+            // the session is saved; AuthGate follows it and enters the store.
+            window.location.reload();
+        } catch (ex) {
+            const msg = String((ex as { message?: string })?.message || '').toLowerCase();
+            setErr(msg === 'code' ? f.err_code : g.err_generic);
         } finally {
             setBusy(false);
         }

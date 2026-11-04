@@ -1,28 +1,36 @@
-import { createClient } from '@supabase/supabase-js';
+// Talks to the VESTA TEM API (Vercel serverless functions in /api). No third-party backend.
+const TOKEN_KEY = 'vesta-tem-token';
 
-// Publishable (public) values: safe to ship in the browser. Data is protected on the server.
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL || 'https://nlupwqdvklqwruxabbgx.supabase.co';
-const SUPABASE_KEY =
-  import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_RcI9TcwbOH5mi2iBZsq8Ow_ki3C7mYn';
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
 
-export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
-});
-
-const FN = `${SUPABASE_URL}/functions/v1/api`;
+export function setToken(token: string | null): void {
+  try {
+    if (token) {
+      localStorage.setItem(TOKEN_KEY, token);
+    } else {
+      localStorage.removeItem(TOKEN_KEY);
+    }
+  } catch {
+    // ignore
+  }
+}
 
 interface ApiResult<T = any> {
   data: T;
 }
 
 async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promise<ApiResult> {
-  const { data: s } = await supabase.auth.getSession();
-  const token = s.session?.access_token;
-  const res = await fetch(`${FN}${path}`, {
+  const token = getToken();
+  const res = await fetch(path, {
     method,
     headers: {
       'Content-Type': 'application/json',
-      apikey: SUPABASE_KEY,
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -43,8 +51,33 @@ async function call(method: 'GET' | 'POST', path: string, body?: unknown): Promi
   return { data };
 }
 
-// Same shape the pages already use (api.get / api.post -> { data }).
 export const api = {
   get: (path: string) => call('GET', path),
   post: (path: string, body?: unknown) => call('POST', path, body),
+};
+
+export type CodePurpose = 'signup' | 'reset';
+
+export const auth = {
+  sendCode: (email: string, purpose: CodePurpose) => call('POST', '/api/auth/send-code', { email, purpose }),
+  async signup(email: string, password: string, code: string) {
+    const { data } = await call('POST', '/api/auth/signup', { email, password, code });
+    setToken(data.token);
+  },
+  async login(email: string, password: string) {
+    const { data } = await call('POST', '/api/auth/login', { email, password });
+    setToken(data.token);
+  },
+  async reset(email: string, code: string, password: string) {
+    const { data } = await call('POST', '/api/auth/reset', { email, code, password });
+    setToken(data.token);
+  },
+  async logout() {
+    try {
+      await call('POST', '/api/auth/logout');
+    } catch {
+      // ignore
+    }
+    setToken(null);
+  },
 };

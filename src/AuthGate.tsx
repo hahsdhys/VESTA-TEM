@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Lock, Mail } from 'lucide-react';
-import { api, supabase } from './client';
+import { api, auth, getToken, setToken } from './client';
+import { CODEX } from './code-i18n';
 import { LANGS } from './i18n';
 import { AUTHX } from './auth-i18n';
 import { FORGOT } from './forgot-i18n';
@@ -56,24 +57,7 @@ function saveLang(lang: LangCode) {
     }
 }
 
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-const GOOGLE_LABEL: Record<LangCode, string> = {
-    en: 'Continue with Google',
-    tl: 'Magpatuloy gamit ang Google',
-    it: 'Continua con Google',
-    es: 'Continuar con Google',
-    fr: 'Continuer avec Google',
-    ja: 'Googleで続行',
-};
-const OR_LABEL: Record<LangCode, string> = {
-    en: 'or use your email',
-    tl: 'o gamitin ang email mo',
-    it: 'oppure usa la tua email',
-    es: 'o usa tu correo',
-    fr: 'ou utilisez votre e-mail',
-    ja: 'またはメールで',
-};
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 export default function AuthGate({ children }: { children: ReactNode }) {
     const [ready, setReady] = useState(false);
@@ -81,17 +65,18 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const [isAdmin, setIsAdmin] = useState(false);
     const [tab, setTab] = useState<'login' | 'signup'>('login');
     const [lang, setLang] = useState<LangCode>(initialLang);
-    const [googleOn, setGoogleOn] = useState(false);
     const [busy, setBusy] = useState(false);
     const [err, setErr] = useState('');
+    const [info, setInfo] = useState('');
     const [email, setEmail] = useState('');
-    const [sent, setSent] = useState(false);
     const [password, setPassword] = useState('');
     const [password2, setPassword2] = useState('');
-    const [info, setInfo] = useState('');
+    const [code, setCode] = useState('');
+    const [codeStep, setCodeStep] = useState(false);
     const [forgot, setForgot] = useState(false);
     const g = GATE[lang];
     const a = AUTHX[lang];
+    const c = CODEX[lang];
     const fg = FORGOT[lang];
 
     useEffect(() => {
@@ -102,70 +87,64 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         root.lang = lang;
     }, [lang]);
 
-    // restore the session and follow sign-in / sign-out (including the return from the email link)
+    // restore the saved session and learn whether this account is the admin
     useEffect(() => {
         let alive = true;
-        const apply = (u: { email?: string; user_metadata?: Record<string, unknown> } | null | undefined) => {
-            if (!alive) {
-                return;
-            }
-            if (u) {
-                const name = (u.user_metadata?.full_name || u.user_metadata?.name || '') as string;
-                setUser({ email: u.email || '', name });
-            } else {
-                setUser(null);
-            }
-        };
-        supabase.auth
-            .getSession()
-            .then(({ data }) => apply(data.session?.user))
-            .catch(() => undefined)
+        if (!getToken()) {
+            setReady(true);
+            return;
+        }
+        api.get('/api/me')
+            .then((res) => {
+                if (alive) {
+                    setUser({ email: res.data.email, name: res.data.name || '' });
+                    setIsAdmin(Boolean(res.data.isAdmin));
+                }
+            })
+            .catch((e: { response?: { status?: number } }) => {
+                if (e?.response?.status === 401) {
+                    setToken(null);
+                }
+            })
             .finally(() => {
                 if (alive) {
                     setReady(true);
                 }
             });
-        const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
-            apply(session?.user);
-            if (alive) {
-                setReady(true);
-            }
-        });
         return () => {
             alive = false;
-            sub.subscription.unsubscribe();
         };
     }, []);
 
-    // ask the backend who this is (decides whether the admin area is available)
-    useEffect(() => {
-        if (!user) {
-            setIsAdmin(false);
-            return;
-        }
-        let alive = true;
-        api.get('/api/me')
-            .then((res) => {
-                if (alive) {
-                    setIsAdmin(Boolean(res?.data?.isAdmin));
-                }
-            })
-            .catch(() => {
-                if (alive) {
-                    setIsAdmin(false);
-                }
-            });
-        return () => {
-            alive = false;
-        };
-    }, [user]);
-
-    const pickLang = (code: LangCode) => {
-        setLang(code);
-        saveLang(code);
+    const enter = async () => {
+        const res = await api.get('/api/me');
+        setUser({ email: res.data.email, name: res.data.name || '' });
+        setIsAdmin(Boolean(res.data.isAdmin));
     };
 
-    const sendLink = async (e: FormEvent) => {
+    const pickLang = (lc: LangCode) => {
+        setLang(lc);
+        saveLang(lc);
+    };
+
+    const fail = (ex: unknown) => {
+        const msg = String((ex as { message?: string })?.message || '').toLowerCase();
+        if (msg === 'exists') {
+            setErr(a.err_exists);
+        } else if (msg === 'wait') {
+            setErr(fg.err_wait);
+        } else if (msg === 'code') {
+            setErr(fg.err_code);
+        } else if (msg.includes('wrong email')) {
+            setErr(a.err_bad);
+        } else if (msg.includes('send the email')) {
+            setErr(c.err_mail);
+        } else {
+            setErr(g.err_generic);
+        }
+    };
+
+    const submit = async (e: FormEvent) => {
         e.preventDefault();
         setErr('');
         setInfo('');
@@ -185,100 +164,43 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         setBusy(true);
         try {
             if (tab === 'signup') {
-                const { data, error } = await supabase.auth.signUp({
-                    email: value,
-                    password,
-                    options: { emailRedirectTo: window.location.origin, data: { app: 'VESTA TEM' } },
-                });
-                if (error) {
-                    throw error;
-                }
-                if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
-                    setErr(a.err_exists);
-                    return;
-                }
-                if (!data.session) {
-                    setSent(true);
+                if (!codeStep) {
+                    await auth.sendCode(value, 'signup');
+                    setCodeStep(true);
+                } else {
+                    await auth.signup(value, password, code.trim());
+                    await enter();
                 }
             } else {
-                const { error } = await supabase.auth.signInWithPassword({ email: value, password });
-                if (error) {
-                    throw error;
-                }
+                await auth.login(value, password);
+                await enter();
             }
         } catch (ex) {
-            const msg = String((ex as { message?: string })?.message || '').toLowerCase();
-            if (msg.includes('not confirmed')) {
-                setErr(a.err_unconfirmed);
-            } else if (msg.includes('invalid login')) {
-                setErr(a.err_bad);
-            } else if (msg.includes('already')) {
-                setErr(a.err_exists);
-            } else {
-                setErr(g.err_generic);
-            }
+            fail(ex);
         } finally {
             setBusy(false);
         }
     };
 
-    const resend = async () => {
+    const resendCode = async () => {
         setErr('');
         setInfo('');
         try {
-            const { error } = await supabase.auth.resend({
-                type: 'signup',
-                email: email.trim().toLowerCase(),
-                options: { emailRedirectTo: window.location.origin },
-            });
-            if (error) {
-                throw error;
-            }
-            setInfo(a.resent);
-        } catch {
-            setErr(g.err_generic);
-        }
-    };
-
-    useEffect(() => {
-        let alive = true;
-        const url = (import.meta.env.VITE_SUPABASE_URL || 'https://nlupwqdvklqwruxabbgx.supabase.co') + '/auth/v1/settings';
-        const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_RcI9TcwbOH5mi2iBZsq8Ow_ki3C7mYn';
-        fetch(url, { headers: { apikey: key } })
-            .then((r) => (r.ok ? r.json() : null))
-            .then((j) => {
-                if (alive) {
-                    setGoogleOn(Boolean(j?.external?.google));
-                }
-            })
-            .catch(() => undefined);
-        return () => {
-            alive = false;
-        };
-    }, []);
-
-    const googleSignIn = async () => {
-        setErr('');
-        setBusy(true);
-        const { error } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: { redirectTo: window.location.origin },
-        });
-        if (error) {
-            setErr(g.err_generic);
-            setBusy(false);
+            await auth.sendCode(email.trim().toLowerCase(), 'signup');
+            setInfo(fg.code_sent);
+        } catch (ex) {
+            fail(ex);
         }
     };
 
     const signOut = async () => {
-        try {
-            await supabase.auth.signOut();
-        } catch {
-            // ignore
-        }
+        await auth.logout();
         setIsAdmin(false);
         setUser(null);
-        setSent(false);
+        setCodeStep(false);
+        setCode('');
+        setPassword('');
+        setPassword2('');
     };
 
     if (ready && user) {
@@ -308,24 +230,6 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                         <p className="muted gate-loading">{g.loading}</p>
                     ) : forgot ? (
                         <ForgotPanel lang={lang} initialEmail={email} onBack={() => setForgot(false)} />
-                    ) : sent ? (
-                        <div className="fb-done">
-                            <span className="fb-check">
-                                <Mail size={26} />
-                            </span>
-                            <h2 className="gate-title">{a.conf_t}</h2>
-                            <p className="muted">{a.conf_d}</p>
-                            <p className="muted small">{a.conf_hint}</p>
-                            <p className="gate-methods">{email.trim()}</p>
-                            {info && <p className="notice">{info}</p>}
-                            {err && <p className="notice" role="alert">{err}</p>}
-                            <button className="btn" onClick={resend}>
-                                {a.resend}
-                            </button>
-                            <button className="btn ghost" onClick={() => { setSent(false); setTab('login'); setErr(''); setInfo(''); }}>
-                                {a.cta_login}
-                            </button>
-                        </div>
                     ) : (
                         <>
                             <div className="seg gate-tabs" role="tablist">
@@ -333,7 +237,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                     role="tab"
                                     aria-selected={tab === 'login'}
                                     className={`chip ${tab === 'login' ? 'on' : ''}`}
-                                    onClick={() => setTab('login')}
+                                    onClick={() => {
+                                        setTab('login');
+                                        setErr('');
+                                        setCodeStep(false);
+                                    }}
                                 >
                                     {g.tab_login}
                                 </button>
@@ -341,31 +249,23 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                     role="tab"
                                     aria-selected={tab === 'signup'}
                                     className={`chip ${tab === 'signup' ? 'on' : ''}`}
-                                    onClick={() => setTab('signup')}
+                                    onClick={() => {
+                                        setTab('signup');
+                                        setErr('');
+                                    }}
                                 >
                                     {g.tab_signup}
                                 </button>
                             </div>
 
-                            <h2 className="gate-title">{tab === 'login' ? g.title_login : g.title_signup}</h2>
-                            <p className="muted">{tab === 'login' ? a.sub_login : a.sub_signup}</p>
+                            <h2 className="gate-title">
+                                {tab === 'signup' && codeStep ? c.conf_t : tab === 'login' ? g.title_login : g.title_signup}
+                            </h2>
+                            <p className="muted">
+                                {tab === 'login' ? a.sub_login : codeStep ? c.conf_d : c.sub_signup}
+                            </p>
 
-                            {googleOn && (
-                                <>
-                            <button type="button" className="btn ghost gate-cta gate-google" onClick={googleSignIn} disabled={busy}>
-                                <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
-                                    <path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z" />
-                                    <path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.5 5.8c4.4-4.1 7.1-10.1 7.1-17.5z" />
-                                    <path fill="#FBBC05" d="M10.5 28.7A14.5 14.5 0 0 1 9.5 24c0-1.6.3-3.2.8-4.7l-7.9-6.1A24 24 0 0 0 0 24c0 3.9.9 7.5 2.6 10.8l7.9-6.1z" />
-                                    <path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.5-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z" />
-                                </svg>
-                                {GOOGLE_LABEL[lang]}
-                            </button>
-                            <p className="muted small">{OR_LABEL[lang]}</p>
-                                </>
-                            )}
-
-                            <form className="gate-form" onSubmit={sendLink}>
+                            <form className="gate-form" onSubmit={submit}>
                                 <label className="set-label" htmlFor="gate-email">
                                     {g.email_label}
                                 </label>
@@ -378,26 +278,31 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                     value={email}
                                     onChange={(ev) => setEmail(ev.target.value)}
                                     placeholder={g.email_ph}
+                                    disabled={tab === 'signup' && codeStep}
                                     required
                                 />
-                                <label className="set-label" htmlFor="gate-pw">
-                                    {a.pw}
-                                </label>
-                                <PasswordInput
-                                    id="gate-pw"
-                                    value={password}
-                                    onChange={setPassword}
-                                    placeholder={a.pw_ph}
-                                    autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
-                                    show={fg.show}
-                                    hide={fg.hide}
-                                />
+                                {!(tab === 'signup' && codeStep) && (
+                                    <>
+                                        <label className="set-label" htmlFor="gate-pw">
+                                            {a.pw}
+                                        </label>
+                                        <PasswordInput
+                                            id="gate-pw"
+                                            value={password}
+                                            onChange={setPassword}
+                                            placeholder={a.pw_ph}
+                                            autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
+                                            show={fg.show}
+                                            hide={fg.hide}
+                                        />
+                                    </>
+                                )}
                                 {tab === 'login' && (
                                     <button type="button" className="link-btn" onClick={() => setForgot(true)}>
                                         {fg.forgot}
                                     </button>
                                 )}
-                                {tab === 'signup' && (
+                                {tab === 'signup' && !codeStep && (
                                     <>
                                         <label className="set-label" htmlFor="gate-pw2">
                                             {a.pw2}
@@ -412,24 +317,57 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                         />
                                     </>
                                 )}
+                                {tab === 'signup' && codeStep && (
+                                    <>
+                                        <label className="set-label" htmlFor="gate-code">
+                                            {fg.code}
+                                        </label>
+                                        <input
+                                            id="gate-code"
+                                            className="gate-input code-input"
+                                            inputMode="numeric"
+                                            autoComplete="one-time-code"
+                                            maxLength={10}
+                                            value={code}
+                                            onChange={(ev) => setCode(ev.target.value.replace(/\D/g, ''))}
+                                            placeholder={fg.code_ph}
+                                            required
+                                        />
+                                    </>
+                                )}
                                 <button className="btn gate-cta" type="submit" disabled={busy}>
-                                    <Mail size={18} /> {tab === 'login' ? a.cta_login : a.cta_signup}
+                                    <Mail size={18} />{' '}
+                                    {tab === 'login' ? a.cta_login : codeStep ? c.verify_cta : c.cta_signup}
                                 </button>
                             </form>
-                            <p className="gate-methods">{g.methods}</p>
+
+                            {tab === 'signup' && codeStep && (
+                                <div className="gate-tabs seg">
+                                    <button type="button" className="btn ghost btn-sm" onClick={resendCode}>
+                                        {fg.resend_code}
+                                    </button>
+                                    <button
+                                        type="button"
+                                        className="btn ghost btn-sm"
+                                        onClick={() => {
+                                            setCodeStep(false);
+                                            setCode('');
+                                            setErr('');
+                                            setInfo('');
+                                        }}
+                                    >
+                                        {g.again}
+                                    </button>
+                                </div>
+                            )}
 
                             {err && (
                                 <p className="notice" role="alert">
                                     {err}
                                 </p>
                             )}
-                            {err === a.err_unconfirmed && (
-                                <button type="button" className="btn ghost btn-sm" onClick={resend}>
-                                    {a.resend}
-                                </button>
-                            )}
                             {info && <p className="notice">{info}</p>}
-                            <p className="muted small">{tab === 'signup' ? a.note_signup : g.note}</p>
+                            {tab === 'signup' && <p className="muted small">{c.note_signup}</p>}
                         </>
                     )}
 
