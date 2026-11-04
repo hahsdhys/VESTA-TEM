@@ -4,6 +4,9 @@ import { Lock, Mail } from 'lucide-react';
 import { api, supabase } from './client';
 import { LANGS } from './i18n';
 import { AUTHX } from './auth-i18n';
+import { FORGOT } from './forgot-i18n';
+import ForgotPanel from './ForgotPanel';
+import PasswordInput from './PasswordInput';
 import type { LangCode } from './i18n';
 import { GATE } from './gate-i18n';
 
@@ -86,8 +89,10 @@ export default function AuthGate({ children }: { children: ReactNode }) {
     const [password, setPassword] = useState('');
     const [password2, setPassword2] = useState('');
     const [info, setInfo] = useState('');
+    const [forgot, setForgot] = useState(false);
     const g = GATE[lang];
     const a = AUTHX[lang];
+    const fg = FORGOT[lang];
 
     useEffect(() => {
         const prefs = readPrefs();
@@ -301,6 +306,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
                     {!ready ? (
                         <p className="muted gate-loading">{g.loading}</p>
+                    ) : forgot ? (
+                        <ForgotPanel lang={lang} initialEmail={email} onBack={() => setForgot(false)} />
                     ) : sent ? (
                         <div className="fb-done">
                             <span className="fb-check">
@@ -376,31 +383,32 @@ export default function AuthGate({ children }: { children: ReactNode }) {
                                 <label className="set-label" htmlFor="gate-pw">
                                     {a.pw}
                                 </label>
-                                <input
+                                <PasswordInput
                                     id="gate-pw"
-                                    className="gate-input"
-                                    type="password"
-                                    autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
                                     value={password}
-                                    onChange={(ev) => setPassword(ev.target.value)}
+                                    onChange={setPassword}
                                     placeholder={a.pw_ph}
-                                    minLength={8}
-                                    required
+                                    autoComplete={tab === 'login' ? 'current-password' : 'new-password'}
+                                    show={fg.show}
+                                    hide={fg.hide}
                                 />
+                                {tab === 'login' && (
+                                    <button type="button" className="link-btn" onClick={() => setForgot(true)}>
+                                        {fg.forgot}
+                                    </button>
+                                )}
                                 {tab === 'signup' && (
                                     <>
                                         <label className="set-label" htmlFor="gate-pw2">
                                             {a.pw2}
                                         </label>
-                                        <input
+                                        <PasswordInput
                                             id="gate-pw2"
-                                            className="gate-input"
-                                            type="password"
-                                            autoComplete="new-password"
                                             value={password2}
-                                            onChange={(ev) => setPassword2(ev.target.value)}
-                                            minLength={8}
-                                            required
+                                            onChange={setPassword2}
+                                            autoComplete="new-password"
+                                            show={fg.show}
+                                            hide={fg.hide}
                                         />
                                     </>
                                 )}

@@ -400,3 +400,10 @@ input[type='range'] { width: 100%; accent-color: var(--accent); }
 
 .protect-wall { position: fixed; inset: 0; z-index: 99999; display: grid; place-items: center; padding: 20px; background: var(--bg); text-align: center; }
 .protect-card { padding: 28px 24px; max-width: 420px; display: flex; flex-direction: column; gap: 10px; }
+
+.pw-wrap { position: relative; width: 100%; }
+.pw-input { padding-right: 48px; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 38px; height: 38px; display: grid; place-items: center; background: none; border: 0; border-radius: 10px; color: var(--muted); }
+.pw-eye:hover { color: var(--accent); }
+.link-btn { align-self: flex-end; background: none; border: 0; padding: 2px 0; color: var(--accent); font-weight: 600; text-decoration: underline; font-size: 0.95rem; }
+.code-input { letter-spacing: 0.4em; text-align: center; font-family: 'Orbitron', sans-serif; font-size: 1.2rem; }
