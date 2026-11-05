@@ -259,9 +259,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             if (!EMAIL_RE.test(email) || password.length < 8 || password.length > 200) {
                 return fail(400, 'Invalid request');
             }
-            if (!(await consumeCode(email, 'signup', clean(body.code, 12)))) {
-                return fail(400, 'code');
-            }
             const hash = await hashPassword(password);
             const made = await q(`insert into users (email, password_hash) values ($1, $2) on conflict (email) do nothing returning id`, [
                 email,

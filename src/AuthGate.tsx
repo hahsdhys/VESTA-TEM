@@ -165,13 +165,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         setBusy(true);
         try {
             if (tab === 'signup') {
-                if (!codeStep) {
-                    await auth.sendCode(value, 'signup');
-                    setCodeStep(true);
-                } else {
-                    await auth.signup(value, password, code.trim());
-                    await enter();
-                }
+                await auth.signup(value, password, '');
+                await enter();
             } else {
                 await auth.login(value, password);
                 await enter();
