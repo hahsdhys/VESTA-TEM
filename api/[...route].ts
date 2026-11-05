@@ -410,6 +410,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return fail(404, 'Not found');
     } catch (e) {
         console.error(e);
-        return fail(500, 'Server error');
+        const x = e as { code?: string; message?: string };
+        const tag = String(x.code || x.message || 'error').replace(/[^A-Za-z0-9_ .-]/g, '').slice(0, 60);
+        return fail(500, `Server error [${tag}]`);
     }
 }

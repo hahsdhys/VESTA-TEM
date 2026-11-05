@@ -141,7 +141,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
             const tag = String((ex as { message?: string })?.message || '').match(/\[[^\]]+\]/)?.[0] || '';
             setErr(`${c.err_mail} ${tag}`.trim());
         } else {
-            setErr(g.err_generic);
+            const raw = String((ex as { message?: string })?.message || '');
+            setErr(`${g.err_generic} (${raw.slice(0, 90)})`);
         }
     };
 
